@@ -1,0 +1,13 @@
+{
+  "_template": "gh:cjolowicz/cookiecutter-hypermodern-python",
+  "author": "Anthony Fong",
+  "copyright_year": "2022",
+  "development_status": "Development Status :: 1 - Planning",
+  "email": "fonganthonym@gmail.com",
+  "friendly_name": "Python Spikedetection",
+  "github_user": "fonganthonym",
+  "license": "MIT",
+  "package_name": "spikedetection",
+  "project_name": "python-spikedetection",
+  "version": "0.0.0"
+}
