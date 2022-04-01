@@ -12,8 +12,8 @@ __email__ = __email__
 
 # Imports #
 # Standard Libraries #
-from collections.abc import Sequence
-from typing import Any, Callable, NamedTuple
+from collections.abc import Callable, Sequence
+from typing import NamedTuple
 import warnings
 
 # Third-Party Packages #
@@ -60,6 +60,29 @@ class FitCurve(NamedTuple):
     spectra: np.ndarray
     r_squared: float
     errors: MeanErrors | None
+
+
+class FitCurves(NamedTuple):
+    """A data class for storing fit curves and their metrics.
+
+    Attributes:
+        curves: The fit curve
+        parameters: The parameters used to create the curve.
+        method: The method to use create the curve.
+        spectra: The original spectra comparing the curve.
+        r_squared: The r squared value of the curve and original spectra.
+        mae: Mean Absolute Error
+        mse: Mean Squared Error
+        rmse: Root Mean Squared Error
+    """
+    curves: np.ndarray
+    parameters: np.ndarray
+    method: Callable[..., np.ndarray]
+    spectra: np.ndarray
+    r_squared: np.ndarray
+    mae: np.ndarray
+    mse: np.ndarray
+    rmse: np.ndarray
 
 
 def iterdim(a: np.ndarray, axis: int = 0) -> np.ndarray:
@@ -229,6 +252,7 @@ class OOFFitter(BaseObject):
         # New Attributes #
         # Signal Information
         self.axis: int = 0
+        self.channel_axis: int = 1
         self.sample_rate: float | None = None
 
         # Power Spectra
@@ -353,7 +377,7 @@ class OOFFitter(BaseObject):
             The prepared power spectra for one over f fitting.
         """
         axis = self.axis if axis is None else axis
-        sample_rate = self.sample_rate if sample_rate is not None else sample_rate
+        sample_rate = self.sample_rate if sample_rate is None else sample_rate
 
         # Create Power Spectra and Frequencies
         spectra = self.fft(data, axis)
@@ -478,8 +502,7 @@ class OOFFitter(BaseObject):
         # Note that these are collected as lists, to concatenate with or without knee later
         off_guess = [spectrum[0] if not self._oof_guess[0] else self._oof_guess[0]]
         kne_guess = [self._oof_guess[1]] if self._fitting_mode == 'knee' else []
-        exp_guess = [np.abs(self.power_spectrum[-1] - self.power_spectrum[0] /
-                            np.log10(self.freqs[-1]) - np.log10(self.freqs[0]))
+        exp_guess = [np.abs(spectrum[-1] - spectrum[0] / np.log10(freqs[-1]) - np.log10(freqs[0]))
                      if not self._oof_guess[2] else self._oof_guess[2]]
         guess = np.array([off_guess + kne_guess + exp_guess])
 
@@ -557,15 +580,18 @@ class OOFFitter(BaseObject):
         return oof_params
 
     def single_fit_power(self, spectrum: np.ndarray, freqs: np.ndarray) -> FitCurve:
-        """Fit a power spectrum to an one over f signal, without data checking.
+        """Fit a power spectrum to a one over f signal, without data checking.
 
         Args:
             spectrum: Power values, which must be input in linear space as an 1D array.
             freqs: Frequency values for the power spectrum, in linear space as an 1D array.
+
+        Returns
+            The fit curve and its metrics.
         """
         # Fitting
         oof_params = self._robust_oof_fit(spectrum, freqs)
-        oof_curve = self._fitting_method(freqs, oof_params)
+        oof_curve = self._fitting_method(freqs, *oof_params)
 
         # Calculate Fitting Statistics
         r_val = np.corrcoef(spectrum, oof_curve)
@@ -577,7 +603,70 @@ class OOFFitter(BaseObject):
             parameters=oof_params,
             method=self._fitting_method,
             r_squared=r_squared,
+            spectra=spectrum,
             errors=errors,
+        )
+
+    def multiple_fit_power(
+        self,
+        spectra: np.ndarray,
+        freqs: np.ndarray,
+        c_axis: int | None = None,
+    ) -> FitCurves:
+        """Fit multiple power spectra to a one over f signal, without data checking.
+
+        Args:
+            spectra: Power values, which must be input in linear space as a 2D array.
+            freqs: Frequency values for the power spectrum, in linear space as an 1D array.
+            c_axis: The axis of channels in the spectra.
+
+        Returns:
+            The fit curves and their metrics.
+        """
+        c_axis = self.channel_axis if c_axis is None else c_axis
+        shape = spectra.shape
+        n_channels = spectra.shape[c_axis]
+        oof_shape = [None, None]
+        oof_shape[0] = n_channels if c_axis == 0 else 3 if self._fitting_mode == 'knee' else 2
+        oof_shape[1] = n_channels if c_axis > 0 else 3 if self._fitting_mode == 'knee' else 2
+
+        oof_params = np.empty(tuple(oof_shape))
+        oof_curves = np.empty(shape)
+        r_squared = np.empty((n_channels,))
+        mae = np.empty((n_channels,))
+        mse = np.empty((n_channels,))
+        rmse = np.empty((n_channels,))
+
+        param_slices = [slice(None)] * 2
+        c_slices = (slice(None),) * c_axis
+
+        for i, spectrum in enumerate(iterdim(spectra, c_axis)):
+            param_slices[c_axis] = i
+
+            curve_slices = c_slices + (i,)
+
+            oof_params[tuple(param_slices)] = oof_args = self._robust_oof_fit(spectrum, freqs)
+            oof_curves[curve_slices] = oof_curve = self._fitting_method(freqs, *oof_args)
+
+            # R Squared
+            r_val = np.corrcoef(spectrum, oof_curve)
+            r_squared[i] = r_val[0][1] ** 2
+
+            # Mean Errors
+            difference = spectrum - oof_curve
+            mae[i] = np.abs(difference).mean()
+            mse[i] = (difference ** 2).mean()
+            rmse[i] = np.sqrt(mse[i])
+
+        return FitCurves(
+            curves=oof_curves,
+            parameters=oof_params,
+            method=self._fitting_method,
+            r_squared=r_squared,
+            spectra=spectra,
+            mae=mae,
+            mse=mse,
+            rmse=rmse
         )
 
     def fit_power(
@@ -615,14 +704,16 @@ class OOFFitter(BaseObject):
         sample_rate: float | None = None,
         f_range: Sequence[float, float] | None = None,
         axis: int | None = None,
-    ) -> FitCurve | tuple[FitCurve]:
-        """Fit a time series to an one over f signal, without data checking.
+        c_axis: int | None = None,
+    ) -> FitCurve | FitCurves:
+        """Fit a time series to a one over f signal, without data checking.
 
         Args:
             data: The timeseries to prepare.
             sample_rate: The sample rate of the data.
             f_range: Frequency range to restrict to, as [lowest_freq, highest_freq].
             axis: The axis to get power spectra of.
+            c_axis: The axis of channels in the spectra.
 
         Returns:
             The fit one over f curves.
@@ -630,10 +721,6 @@ class OOFFitter(BaseObject):
         spectra, freqs = self._prepare_timeseries(data, sample_rate, axis, f_range)
 
         if spectra.ndim == 1:
-            return self.single_fit_power(spectra, freqs)
+            return self.single_fit_power(spectrum=spectra, freqs=freqs)
         else:
-            curves = [None] * spectra.shape[axis]
-            for i, spectrum in enumerate(iterdim(spectra, axis)):
-                curves[i] = self.single_fit_power(spectra, freqs)
-
-            return tuple(curves)
+            return self.multiple_fit_power(spectra=spectra, freqs=freqs, c_axis=c_axis)
