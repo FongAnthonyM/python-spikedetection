@@ -1,5 +1,5 @@
 """ ooffitter.py
-
+A data processing object which fits a one over f curve to given data or spectra.
 """
 # Package Header #
 from ...header import *
@@ -13,7 +13,6 @@ __email__ = __email__
 # Imports #
 # Standard Libraries #
 from collections.abc import Callable, Sequence
-from typing import NamedTuple
 import warnings
 
 # Third-Party Packages #
@@ -23,66 +22,12 @@ import numpy as np
 from scipy.optimize import curve_fit
 
 # Local Packages #
+from .dataclasses import MeanErrors, PowerSpectra, FitSpectrumCurve, FitSpectrumCurves
 
 
 # Definitions #
 class FitError(Exception):
     """Error for a failure to fit."""
-
-
-class MeanErrors(NamedTuple):
-    """A data class for containing mean errors."""
-    mae: np.ndarray
-    mse: np.ndarray
-    rmse: np.ndarray
-
-
-class PowerSpectra(NamedTuple):
-    """A data class containing a power spectra and its frequencies."""
-    spectra: np.ndarray
-    frequencies: np.ndarray
-
-
-class FitCurve(NamedTuple):
-    """A data class for storing a curve fit and its metrics.
-
-    Attributes:
-        curve: The fit curve
-        parameters: The parameters used to create the curve.
-        method: The method to use create the curve.
-        spectra: The original spectra comparing the curve.
-        r_squared: The r squared value of the curve and original spectra.
-        errors: The errors of the curve.
-    """
-    curve: np.ndarray
-    parameters: np.ndarray
-    method: Callable[..., np.ndarray]
-    spectra: np.ndarray
-    r_squared: float
-    errors: MeanErrors | None
-
-
-class FitCurves(NamedTuple):
-    """A data class for storing fit curves and their metrics.
-
-    Attributes:
-        curves: The fit curve
-        parameters: The parameters used to create the curve.
-        method: The method to use create the curve.
-        spectra: The original spectra comparing the curve.
-        r_squared: The r squared value of the curve and original spectra.
-        mae: Mean Absolute Error
-        mse: Mean Squared Error
-        rmse: Root Mean Squared Error
-    """
-    curves: np.ndarray
-    parameters: np.ndarray
-    method: Callable[..., np.ndarray]
-    spectra: np.ndarray
-    r_squared: np.ndarray
-    mae: np.ndarray
-    mse: np.ndarray
-    rmse: np.ndarray
 
 
 def iterdim(a: np.ndarray, axis: int = 0) -> np.ndarray:
@@ -579,7 +524,7 @@ class OOFFitter(BaseObject):
 
         return oof_params
 
-    def single_fit_power(self, spectrum: np.ndarray, freqs: np.ndarray) -> FitCurve:
+    def single_fit_power(self, spectrum: np.ndarray, freqs: np.ndarray) -> FitSpectrumCurve:
         """Fit a power spectrum to a one over f signal, without data checking.
 
         Args:
@@ -598,7 +543,7 @@ class OOFFitter(BaseObject):
         r_squared = r_val[0][1] ** 2
         errors = calculate_mean_errors(spectrum, oof_curve)
 
-        return FitCurve(
+        return FitSpectrumCurve(
             curve=oof_curve,
             parameters=oof_params,
             method=self._fitting_method,
@@ -612,7 +557,7 @@ class OOFFitter(BaseObject):
         spectra: np.ndarray,
         freqs: np.ndarray,
         c_axis: int | None = None,
-    ) -> FitCurves:
+    ) -> FitSpectrumCurves:
         """Fit multiple power spectra to a one over f signal, without data checking.
 
         Args:
@@ -658,7 +603,7 @@ class OOFFitter(BaseObject):
             mse[i] = (difference ** 2).mean()
             rmse[i] = np.sqrt(mse[i])
 
-        return FitCurves(
+        return FitSpectrumCurves(
             curves=oof_curves,
             parameters=oof_params,
             method=self._fitting_method,
@@ -675,7 +620,7 @@ class OOFFitter(BaseObject):
         freqs: np.ndarray,
         f_range: Sequence[int, int] | None = None,
         axis: int | None = None,
-    ) -> FitCurve | tuple[FitCurve]:
+    ) -> FitSpectrumCurve | tuple[FitSpectrumCurve]:
         """Fit a power spectrum to an one over f signal.
 
         Args:
@@ -705,7 +650,7 @@ class OOFFitter(BaseObject):
         f_range: Sequence[float, float] | None = None,
         axis: int | None = None,
         c_axis: int | None = None,
-    ) -> FitCurve | FitCurves:
+    ) -> FitSpectrumCurve | FitSpectrumCurves:
         """Fit a time series to a one over f signal, without data checking.
 
         Args:
