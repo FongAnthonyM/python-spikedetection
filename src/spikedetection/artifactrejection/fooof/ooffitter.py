@@ -45,20 +45,21 @@ def iterdim(a: np.ndarray, axis: int = 0) -> np.ndarray:
         yield a[slices + (i,)]
 
 
-def calculate_mean_errors(a: np.ndarray, b: np.ndarray) -> MeanErrors:
+def calculate_mean_errors(a: np.ndarray, b: np.ndarray, axis: int | None = None) -> MeanErrors:
     """Calculates the mean errors between two arrays.
 
     Args:
         a: The primary array.
         b: The secondary array.
+        axis: The axis to calculate the mean along.
 
     Returns:.
         The mean errors between the two arrays
     """
     difference = a - b
 
-    mae = np.abs(difference).mean()
-    mse = (difference ** 2).mean()
+    mae = np.abs(difference).mean(axis)
+    mse = (difference ** 2).mean(axis)
     rmse = np.sqrt(mse)
 
     return MeanErrors(mae, mse, rmse)
@@ -549,7 +550,9 @@ class OOFFitter(BaseObject):
             method=self._fitting_method,
             r_squared=r_squared,
             spectra=spectrum,
-            errors=errors,
+            mae=errors.mae,
+            mse=errors.mse,
+            rmse=errors.rmse,
         )
 
     def multiple_fit_power(

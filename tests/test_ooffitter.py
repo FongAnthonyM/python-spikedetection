@@ -23,6 +23,7 @@ import pstats
 from pstats import Stats, f8, func_std_string
 import time
 import warnings
+from typing import NamedTuple
 
 # Third-Party Packages #
 from fooof.sim.gen import gen_aperiodic
@@ -36,6 +37,7 @@ from scipy.io import loadmat
 from xltektools.hdf5framestructure import XLTEKStudyFrame
 
 # Local Packages #
+from src.spikedetection.artifactrejection.fooof.goodnessauditor import GoodnessAuditor, RSquaredBoundsAudit
 from src.spikedetection.artifactrejection.fooof.ooffitter import OOFFitter
 
 
@@ -102,6 +104,13 @@ class StatsMicro(Stats):
         else:
             print(str(f8(ct / cc * 1000000)).rjust(12), end=" ", file=self.stream)
         print(func_std_string(func), file=self.stream)
+
+
+# Data Classes
+class ElectrodeLead(NamedTuple):
+    name: str
+    type: str
+    contacts: dict
 
 
 # Functions #
@@ -340,68 +349,51 @@ class ClassTest(abc.ABC):
 
 
 class TestOOFitter:
+    SUBJECT_ID = "EC212"
+    WINDOW_SIZE = 10.0
+    OUT_DIR = pathlib.Path(f"/home/anthonyfong/ProjectData/EpilepsySpikeDetection/{SUBJECT_ID}/artifact")
+    OUT_R_PATH = OUT_DIR.joinpath(f"R2_{WINDOW_SIZE}seconds.h5")
+    PLOT_WINDOW = True
 
-    def test_r_squared(self):
-        # Setup #
-        SUBJECT_ID = 'EC212'
-        win_size = 10
-        plot_window = True
-        a_out_dir = pathlib.Path(f"/home/anthonyfong/ProjectData/EpilepsySpikeDetection/{SUBJECT_ID}/artifact")
-        a_out_r_path = a_out_dir.joinpath(f"R2_{win_size}seconds.h5")
+    IMG_PATH = pathlib.Path("/common/imaging/subjects/")
+    IMAGING_PATH = IMG_PATH.joinpath(SUBJECT_ID, "elecs", "clinical_TDT_elecs_all.mat")
+    EXCLUDE_ELECTRODES = {'EKG', 'REF', 'Reference'}
 
-        # %%
+    DURATION = datetime.timedelta(minutes=1)
+
+    def load_electrode_map(self):
         # Load Electrode Montage #
-        IMG_PATH = pathlib.Path('/common/imaging/subjects/')
-        IMAGING_PATH = IMG_PATH.joinpath(SUBJECT_ID, 'elecs', 'clinical_TDT_elecs_all.mat')
-        IMAGING = loadmat(IMAGING_PATH.as_posix(), squeeze_me=True)
+        elecs_file = loadmat(self.IMAGING_PATH.as_posix(), squeeze_me=True)
 
         # Generate Bipolar Montage
-        BP_ELECS_ALL = make_bipolar_elecs_all(IMAGING['eleclabels'], IMAGING['elecmatrix'])
+        bipolar_electrodes = make_bipolar_elecs_all(elecs_file['eleclabels'], elecs_file['elecmatrix'])
 
         # Remove common bad labels
-        BAD_EL = ['EKG', 'REF', 'Reference']
-        BP_ELECS_ALL = BP_ELECS_ALL.loc[~BP_ELECS_ALL['Lead'].isin(BAD_EL)]
+        return bipolar_electrodes.loc[~bipolar_electrodes['Lead'].isin(self.EXCLUDE_ELECTRODES)]
 
-        # %%
+    def test_r_squared(self):
+        # Load Electrode Map
+        bipolar_electrode_map = self.load_electrode_map()
+
         # Load Study #
         STUDY_PATH = pathlib.Path('/common/xltek/subjects')
-        study_frame = XLTEKStudyFrame(s_id=SUBJECT_ID, studies_path=STUDY_PATH)
+        study_frame = XLTEKStudyFrame(s_id=self.SUBJECT_ID, studies_path=STUDY_PATH)
 
-        T0 = (study_frame.start_datetime + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0,
-                                                                               microsecond=0)
-        T0 = T0 + datetime.timedelta(seconds=0)
+        # Time Information
+        T0 = study_frame.frames[1].start_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
         t0 = T0
-        tF = T0 + datetime.timedelta(minutes=1)
-        tD = datetime.timedelta(seconds=win_size)
+        tF = T0 + self.DURATION
+        tD = datetime.timedelta(seconds=self.WINDOW_SIZE)
 
         # Artifact Stuff
         oof = OOFFitter(sample_rate=1024.0, axis=0)
         oof.lower_frequency = 3
         oof.upper_frequency = 150
+
+        auditor = GoodnessAuditor(r_squared_bounded=RSquaredBoundsAudit())
+        auditor.set_audit("r_squared_bounded")
+
         fg = FOOOFGroup(peak_width_limits=[4, 8], min_peak_height=0.05, max_n_peaks=0, verbose=True)
-        artifact_tracking = {
-            'Timestamp': {'Start': [], 'End': [], 'Elapsed': []},  # General timestamp info for each window chunk
-
-            "Timing": {"Spectra": [], "fooof": []},
-
-            "spectra": {"r_squared": []},
-
-            'channel_artifact': {'otl_state': [],  # Vector of historical state-values per channel
-                                 'otl_decay': half_life(5, 0.5),
-                                 # Duration that a single artifact occurrence should persist
-                                 'otl_thresh': 1.5,
-                                 # Threshold for determining whether a channel artifact has occurred
-                                 'is_bad': []},  # Final binary designation of which channels are bad
-
-            'population_artifact': {'otl_state': [],  # Vector of historical state-values for the entire population
-                                    'otl_decay': half_life(60, 0.5),
-                                    # Duration that a single artifact occurrence should persist
-                                    'otl_welford': None,
-                                    # Threshold for determining whether a population artifact has occurred
-                                    'otl_thresh': 10,
-                                    # Threshold for determining whether a channel artifact has occurred
-                                    'is_bad': []}  # Final binary designation of whether a channel is bad
-        }
 
         # Iterate over windows of the study frame
         while t0 <= (tF - tD):
@@ -409,87 +401,50 @@ class TestOOFitter:
             t1 = t0 + tD
 
             # print('\r{} -- {}'.format(t0, t1), end='')
+            ### Try to grab current frame
+            raw_ecog = get_ECoG_sample(study_frame, t0, t1)
+            raw_ecog = convert_ECoG_BP(raw_ecog, bipolar_electrode_map)
+            if len(raw_ecog['data']) < (raw_ecog['fs'] * self.WINDOW_SIZE):
+                raise Exception('Unable to grab full ECoG window.')
 
-            try:
-                ### Try to grab current frame
-                raw_ecog = get_ECoG_sample(study_frame, t0, t1)
-                raw_ecog = convert_ECoG_BP(raw_ecog, BP_ELECS_ALL)
-                if len(raw_ecog['data']) < (raw_ecog['fs'] * win_size):
-                    raise Exception('Unable to grab full ECoG window.')
+            # Spectra Rejection
 
-                # Spectra Rejection
+            # OOF
+            out = oof.fit_timeseries(data=raw_ecog["data"])
 
-                # OOF
-                out = oof.fit_timeseries(data=raw_ecog["data"])
+            goodness = auditor.run_audit(info=out)
 
-                # FOOF
-                s_start = time.perf_counter()
-                f_transform = np.fft.rfft(raw_ecog["data"], axis=0)
-                spectra = np.square(np.abs(f_transform))
-                s_timing = time.perf_counter() - s_start
+            # FOOF
+            s_start = time.perf_counter()
+            f_transform = np.fft.rfft(raw_ecog["data"], axis=0)
+            spectra = np.square(np.abs(f_transform))
 
-                freqs = np.linspace(0, 1024.0 / 2, spectra.shape[0])
+            freqs = np.linspace(0, 1024.0 / 2, spectra.shape[0])
 
-                f_start = time.perf_counter()
+            f_start = time.perf_counter()
 
-                fg.fit(freqs=freqs, power_spectra=spectra.T, freq_range=[3, 150], n_jobs=1)
+            fg.fit(freqs=freqs, power_spectra=spectra.T, freq_range=[3, 150], n_jobs=1)
 
-                f_timing = time.perf_counter() - f_start
+            r_squared_vector = np.array([c[2] for c in fg.group_results], ndmin=2)
 
-                r_squared_vector = np.array([c[2] for c in fg.group_results], ndmin=2)
+            if self.PLOT_WINDOW:
+                # Plot
+                plot_time_stacked(raw_ecog["data"], 1024)
+                fig1 = plt.figure()
+                ax1 = fig1.add_subplot(211)
+                ax1.set_ylim([-0.1, 1.1])
+                ax1.plot(r_squared_vector.T, linestyle="", marker="o")
+                ax1.plot(out.r_squared, linestyle="", marker="o")
+                ax1.set_title('R2 & Goodness Values')
+                ax1.set_ylabel('R Squared')
 
-                all = artifact_tracking["spectra"]["r_squared"]
-                artifact_tracking["spectra"]["r_squared"].append(r_squared_vector)
+                ax2 = fig1.add_subplot(212)
+                ax2.set_ylim([-0.1, 1.1])
+                ax2.plot(goodness, linestyle="", marker="o")
+                ax2.set_xlabel('Channels')
+                ax2.set_ylabel('Goodness')
 
-                artifact_tracking["Timing"]["Spectra"].append(s_timing)
-                artifact_tracking["Timing"]["fooof"].append(f_timing)
-
-                if plot_window:
-                    # Plot
-                    plot_time_stacked(raw_ecog["data"], 1024)
-                    fig1 = plt.figure()
-                    ax1 = fig1.add_subplot(111)
-                    ax1.plot(r_squared_vector.T, linestyle="", marker="o")
-                    ax1.plot(out.r_squared, linestyle="", marker="o")
-                    plt.show()
-
-
-            except Exception as E:
-                print(E)
-
-            #### Update the artifact tracking dictionary
-            artifact_tracking['Timestamp']['Start'].append(t0)
-            artifact_tracking['Timestamp']['End'].append(t1)
-            artifact_tracking['Timestamp']['Elapsed'].append((t0 - T0).total_seconds())
-
-        all_r_squared = np.concatenate(artifact_tracking["spectra"]["r_squared"], axis=0)
-        timestamps = np.array([dt.timestamp() for dt in artifact_tracking["Timestamp"]["Start"]])
-
-        # Save Data
-        with R2HDF5(file=a_out_r_path, create=True, build=True) as s_file:
-            s_file["data"].require(data=all_r_squared, sample_rate=1.0 / win_size,
-                                   start=artifact_tracking["Timestamp"]["Start"][0])
-            R2_timeseries = s_file["data"]
-            time_axis = R2_timeseries.time_axis
-            time_axis[...] = timestamps
-
-        # Load Data
-        with R2HDF5(file=a_out_r_path, load=True) as l_file:
-            R2_timeseries = l_file["data"]
-            time_axis = R2_timeseries.time_axis
-            fig1 = plt.figure(figsize=(10, 10), dpi=320)
-            ax1 = fig1.add_subplot()
-            ax1.imshow(R2_timeseries[...].T,
-                       vmin=0,
-                       vmax=1,
-                       aspect="auto",
-                       cmap='Reds')
-            ax1.set_xlabel('Windows')
-            ax1.set_ylabel('Channels')
-            ax1.set_title('Channel-wise R2 Values')
-            ax1.xaxis.set_ticks_position('bottom')
-
-            plt.show()
+                plt.show()
 
 
 # Main #

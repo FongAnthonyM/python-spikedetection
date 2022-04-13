@@ -52,7 +52,9 @@ class FitSpectrumCurve(NamedTuple):
     method: Callable[..., np.ndarray]
     spectra: np.ndarray
     r_squared: float
-    errors: MeanErrors | None
+    mae: np.ndarray
+    mse: np.ndarray
+    rmse: np.ndarray
 
 
 class FitSpectrumCurves(NamedTuple):
