@@ -20,6 +20,8 @@ from baseobjects import BaseObject, singlekwargdispatchmethod, search_sentinel
 from fooof import FOOOF
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.signal import savgol_filter
+from scipy.stats import entropy
 
 # Local Packages #
 from .dataclasses import MeanErrors, PowerSpectra, FitSpectrumCurve, FitSpectrumCurves
@@ -310,6 +312,7 @@ class OOFFitter(BaseObject):
         sample_rate: float | None = None,
         f_range: Sequence[float, float] | None = None,
         axis: int | None = None,
+        smoothing: bool = True,
     ) -> PowerSpectra:
         """Prepares a set of timeseries for fitting the one over f curve.
 
@@ -318,6 +321,7 @@ class OOFFitter(BaseObject):
             sample_rate: The sample rate of the data.
             f_range: Frequency range to restrict to, as [lowest_freq, highest_freq].
             axis: The axis to get power spectra of.
+            smoothing: Determines if smoothing will be done on the spectra.
 
         Returns:
             The prepared power spectra for one over f fitting.
@@ -351,6 +355,15 @@ class OOFFitter(BaseObject):
 
         # Put Spectra in Log Space
         spectra = np.log10(spectra)
+
+        if smoothing:
+            smooth_spectra = np.empty(spectra.shape)
+            c_slices = (slice(None),) * self.channel_axis
+
+            for i, spectrum in enumerate(iterdim(spectra, self.channel_axis)):
+                curve_slices = c_slices + (i,)
+                smooth_spectra[curve_slices] = savgol_filter(spectrum, 12, 5)
+            spectra = smooth_spectra
 
         return PowerSpectra(spectra, freqs)
 
@@ -542,14 +555,23 @@ class OOFFitter(BaseObject):
         # Calculate Fitting Statistics
         r_val = np.corrcoef(spectrum, oof_curve)
         r_squared = r_val[0][1] ** 2
+
         errors = calculate_mean_errors(spectrum, oof_curve)
+
+        curve_removed = spectrum - oof_curve
+        curve_2 = curve_removed ** 2
+        prob = curve_2 / np.sum(curve_2, axis=0)
+        entro = entropy(prob)
+        normal_entropy = entro / np.log(prob.shape[0])
 
         return FitSpectrumCurve(
             curve=oof_curve,
             parameters=oof_params,
             method=self._fitting_method,
+            frequencies=freqs,
             r_squared=r_squared,
             spectra=spectrum,
+            normal_entropy=normal_entropy,
             mae=errors.mae,
             mse=errors.mse,
             rmse=errors.rmse,
@@ -581,6 +603,7 @@ class OOFFitter(BaseObject):
         oof_params = np.empty(tuple(oof_shape))
         oof_curves = np.empty(shape)
         r_squared = np.empty((n_channels,))
+        normal_entropy = np.empty((n_channels,))
         mae = np.empty((n_channels,))
         mse = np.empty((n_channels,))
         rmse = np.empty((n_channels,))
@@ -600,8 +623,14 @@ class OOFFitter(BaseObject):
             r_val = np.corrcoef(spectrum, oof_curve)
             r_squared[i] = r_val[0][1] ** 2
 
-            # Mean Errors
             difference = spectrum - oof_curve
+            # Normalized Spectral Entropy
+            curve_2 = difference ** 2
+            prob = curve_2 / np.sum(curve_2, axis=0)
+            entro = entropy(prob)
+            normal_entropy[i] = entro / np.log(prob.shape[0])
+
+            # Mean Errors
             mae[i] = np.abs(difference).mean()
             mse[i] = (difference ** 2).mean()
             rmse[i] = np.sqrt(mse[i])
@@ -610,8 +639,10 @@ class OOFFitter(BaseObject):
             curves=oof_curves,
             parameters=oof_params,
             method=self._fitting_method,
+            frequencies=freqs,
             r_squared=r_squared,
             spectra=spectra,
+            normal_entropy=normal_entropy,
             mae=mae,
             mse=mse,
             rmse=rmse

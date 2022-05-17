@@ -45,13 +45,18 @@ class FitSpectrumCurve(NamedTuple):
         method: The method to use create the curve.
         spectra: The original spectra comparing the curve.
         r_squared: The r squared value of the curve and original spectra.
-        errors: The errors of the curve.
+        normal_entropy: The normalized spectral entropy of the flattened signal.
+        mae: Mean Absolute Error
+        mse: Mean Squared Error
+        rmse: Root Mean Squared Error
     """
     curve: np.ndarray
     parameters: np.ndarray
     method: Callable[..., np.ndarray]
     spectra: np.ndarray
+    frequencies: np.ndarray
     r_squared: float
+    normal_entropy: float
     mae: np.ndarray
     mse: np.ndarray
     rmse: np.ndarray
@@ -66,6 +71,7 @@ class FitSpectrumCurves(NamedTuple):
         method: The method to use create the curve.
         spectra: The original spectra comparing the curve.
         r_squared: The r squared value of the curve and original spectra.
+        normal_entropy: The normalized spectral entropy of the flattened signal.
         mae: Mean Absolute Error
         mse: Mean Squared Error
         rmse: Root Mean Squared Error
@@ -73,8 +79,10 @@ class FitSpectrumCurves(NamedTuple):
     curves: np.ndarray
     parameters: np.ndarray
     method: Callable[..., np.ndarray]
+    frequencies: np.ndarray
     spectra: np.ndarray
     r_squared: np.ndarray
+    normal_entropy: np.ndarray
     mae: np.ndarray
     mse: np.ndarray
     rmse: np.ndarray
