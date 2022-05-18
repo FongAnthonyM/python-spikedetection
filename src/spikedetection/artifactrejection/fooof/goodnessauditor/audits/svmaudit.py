@@ -29,19 +29,25 @@ from .goodnessauditinterface import GoodnessAuditInterface
 # Definitions #
 # Classes #
 class SVMAudit(GoodnessAuditInterface):
-    """
-
-    Class Attributes:
+    """A goodness audit which uses several metrics from a signal to determine goodness with a svm.
 
     Attributes:
+        _path: The path to the saved svm.
+        _probability: Determines if the probability will be returned as goodness.
+        _svm: The SVM object that determines the goodness of the given metrics.
 
     Args:
-
+        svm: The SVM object that determines the goodness of the given metrics.
+        path: The path to a saved svm.
+        probability: Determines if the probability will be returned as goodness.
+        init: Determines if this object will be constructed.
     """
+
     # Magic Methods #
     # Construction/Destruction
     def __init__(
-        self, svm: SVC | None = None,
+        self,
+        svm: SVC | None = None,
         path: str | pathlib.Path | None = None,
         probability: bool = False,
         init: bool = True,
@@ -58,6 +64,7 @@ class SVMAudit(GoodnessAuditInterface):
 
     @property
     def path(self) -> pathlib.Path | None:
+        """The path to the saved svm."""
         return self._path
 
     @path.setter
@@ -69,6 +76,7 @@ class SVMAudit(GoodnessAuditInterface):
             
     @property
     def probability(self):
+        """Determines if the probability will be returned as goodness."""
         return self._path
     
     @probability.setter
@@ -80,6 +88,7 @@ class SVMAudit(GoodnessAuditInterface):
 
     @property
     def svm(self):
+        """The SVM object that determines the goodness of the given metrics."""
         return self._svm
 
     @svm.setter
@@ -97,6 +106,13 @@ class SVMAudit(GoodnessAuditInterface):
         path: str | pathlib.Path | None = None,
         probability: bool | None = None,
     ) -> None:
+        """Constructs this object.
+
+        Args:
+            svm: The SVM object that determines the goodness of the given metrics.
+            path: The path to a saved svm.
+            probability: Determines if the probability will be returned as goodness.
+        """
         if svm is not None:
             self.svm = svm
             
@@ -110,6 +126,11 @@ class SVMAudit(GoodnessAuditInterface):
             self.load_svm()
 
     def load_svm(self, path: str | pathlib.Path | None = None) -> None:
+        """Loads a pickled svm.
+
+        Args:
+            path: The path to a saved svm.
+        """
         if path is not None:
             self.path = path
         
@@ -122,7 +143,7 @@ class SVMAudit(GoodnessAuditInterface):
         """Runs the audit to determine the goodness of the fit.
 
         Args:
-            info: Either a FitSepctrumCurve data object or the R squared values of the curves.
+            info: Either a FitSepctrumCurve data object or the metrics of the signal.
 
         Returns:
             The goodness values of the curves.
@@ -134,7 +155,7 @@ class SVMAudit(GoodnessAuditInterface):
         """Runs the audit to determine the goodness of the fits.
 
         Args:
-            info: The R squared values to determine their goodness.
+            info: The metrics of the signal.
 
         Returns:
             The goodness values of the curves.
@@ -146,7 +167,7 @@ class SVMAudit(GoodnessAuditInterface):
         """Runs the audit to determine the goodness of the fit.
 
         Args:
-            info: The curve and its metrics that will determine its goodness.
+            info: A FitSepctrumCurve data object which contains the metrics of the signal.
 
         Returns:
             The goodness values of the curve.
@@ -167,7 +188,7 @@ class SVMAudit(GoodnessAuditInterface):
         """Runs the audit to determine the goodness of the fits.
 
         Args:
-            info: The curves and their metrics that will determine their goodness.
+            info: A FitSepctrumCurves data object which contains the metrics of signals.
 
         Returns:
             The goodness values of the curves.
@@ -186,6 +207,14 @@ class SVMAudit(GoodnessAuditInterface):
         return self.goodness_audit(metrics_=metrics_)
 
     def goodness_audit(self, metrics_: np.ndarray) -> np.ndarray:
+        """The audit to determine the goodness of the signal.
+
+        Args:
+            metrics_: The metrics of the signal
+
+        Returns:
+            The goodness values of the curves.
+        """
         if self._probability:
             return self._svm.predict_proba(metrics_)
         else:
