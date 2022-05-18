@@ -584,14 +584,22 @@ class TestOOFitter:
             if self.PLOT_WINDOW:
                 # Plot
                 plot_time_stacked(raw_ecog["data"], 1024)
-                plot_spectrum_stacked(out.spectra[:, 175:185], out.frequencies)
+                plot_spectrum_stacked(out.spectra[:, 174:211], out.frequencies)
 
                 fig1 = plt.figure()
-                ax1 = fig1.add_subplot(111)
+                ax1 = fig1.add_subplot(211)
                 ax1.set_ylim([-0.1, 1.1])
-                ax1.plot(goodness, linestyle="", marker="o")
-                ax1.set_xlabel('Channels')
+
+                ax1.plot(goodness[:, 0], linestyle="", marker="o")
                 ax1.set_ylabel('Goodness')
+
+                ax2 = fig1.add_subplot(212)
+                ax2.set_ylim([-0.1, 1.1])
+
+                ax2.plot(goodness[:, 1], linestyle="", marker="o")
+
+                ax2.set_xlabel('Channels')
+                ax1.set_ylabel('Badness')
 
                 plt.show()
 
@@ -1616,6 +1624,37 @@ class TestArtifact:
         metrics_ = metrics_all_scaled[metrics_list]
         importlib.reload(np.core.numeric)  # Pandas causes numpy to break which is dumb....
         svm.fit(metrics_.to_numpy(), review_dataframe["Reviewer Union"])
+
+        review_all_prediction = svm.decision_function(metrics_)
+        d_pr, d_rec, d_thresh = metrics.precision_recall_curve(review_dataframe["Reviewer Union"], review_all_prediction)
+
+        review_all_probability = svm.predict_proba(metrics_)
+        p_pr, p_rec, p_thresh = metrics.precision_recall_curve(review_dataframe["Reviewer Union"], review_all_probability[:, 1])
+
+        pc_xlabel = "Recall"
+        pc_ylabel = "Precision"
+
+        fig, axs = plt.subplots(2, 1, figsize=(20, 20))
+        axs[0].set(xlabel=pc_xlabel, ylabel=pc_ylabel, title=f"Precision Recall")
+        axs[0].set_xticks(np.arange(0, 1.1, 0.1))
+        axs[0].set_yticks(np.arange(0, 1.1, 0.1))
+        axs[0].grid(color='gray', linestyle='-', linewidth=0.5)
+        axs[0].plot([0, 1], [0, 0], 'g--')
+        axs[0].plot(d_rec, d_pr)
+
+        axs[1].set(xlabel=pc_xlabel, ylabel=pc_ylabel, title=f"Precision Recall")
+        axs[1].set_xticks(np.arange(0, 1.1, 0.1))
+        axs[1].set_yticks(np.arange(0, 1.1, 0.1))
+        axs[1].grid(color='gray', linestyle='-', linewidth=0.5)
+        axs[1].plot([0, 1], [0, 0], 'g--')
+        axs[1].plot(p_rec, p_pr)
+
+        importlib.reload(np.core.numeric)  # Pandas causes numpy to break which is dumb....
+        plt.show()
+
+        p_index = int(np.searchsorted(p_pr, 0.9, side="right") - 1)
+        thresh = p_thresh[p_index]
+        print(thresh)
 
         s = pickle.dumps(svm)
         with self.SVM_PATH.open("wb") as file_object:
