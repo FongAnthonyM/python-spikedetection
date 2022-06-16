@@ -332,7 +332,7 @@ def plot_time_stacked(sig, fs, wsize=10, color='k', labels=None, zscore=True, sc
     for ch, sig_ch in enumerate(sig_Z.T):
         ax.plot(ts, sig_ch + offset[ch], color=color, alpha=0.5, linewidth=0.5)
 
-        ax.hlines(offset[ch], ts[0], ts[-1], color='k', alpha=1.0, linewidth=0.2)
+        #ax.hlines(offset[ch], ts[0], ts[-1], color='k', alpha=1.0, linewidth=0.2)
 
     ax.set_yticks(offset)
     ax.set_yticklabels(labels)
@@ -386,7 +386,7 @@ def plot_spectrum_stacked(spectra, freqs, color='k', labels=None, zscore=True, s
     for ch, sig_ch in enumerate(sig_Z.T):
         ax.plot(freqs, sig_ch + offset[ch], color=color, alpha=0.5, linewidth=0.5)
 
-        ax.hlines(offset[ch], freqs[0], freqs[-1], color='k', alpha=1.0, linewidth=0.2)
+        #ax.hlines(offset[ch], freqs[0], freqs[-1], color='k', alpha=1.0, linewidth=0.2)
 
     ax.set_yticks(offset)
     ax.set_yticklabels(labels)
@@ -1629,31 +1629,49 @@ class TestArtifact:
         d_pr, d_rec, d_thresh = metrics.precision_recall_curve(review_dataframe["Reviewer Union"], review_all_prediction)
 
         review_all_probability = svm.predict_proba(metrics_)
-        p_pr, p_rec, p_thresh = metrics.precision_recall_curve(review_dataframe["Reviewer Union"], review_all_probability[:, 1])
+        p_pr, p_rec, p_prec_thresh = metrics.precision_recall_curve(review_dataframe["Reviewer Union"], review_all_probability[:, 1])
+        p_fpr, p_tpr, p_roc_thresh = metrics.roc_curve(review_dataframe["Reviewer Union"], review_all_probability[:, 1])
 
         pc_xlabel = "Recall"
         pc_ylabel = "Precision"
 
-        fig, axs = plt.subplots(2, 1, figsize=(20, 20))
-        axs[0].set(xlabel=pc_xlabel, ylabel=pc_ylabel, title=f"Precision Recall")
-        axs[0].set_xticks(np.arange(0, 1.1, 0.1))
-        axs[0].set_yticks(np.arange(0, 1.1, 0.1))
-        axs[0].grid(color='gray', linestyle='-', linewidth=0.5)
-        axs[0].plot([0, 1], [0, 0], 'g--')
-        axs[0].plot(d_rec, d_pr)
+        importlib.reload(np.core.numeric)  # Pandas causes numpy to break which is dumb....
+        fig, axs = plt.subplots(2, 2, figsize=(20, 20))
+        axs[0, 0].set(xlabel="False Positive Rate", ylabel="True Positive Rate", title=f"ROC")
+        axs[0, 0].set_xticks(np.arange(0, 1.1, 0.1))
+        axs[0, 0].set_yticks(np.arange(0, 1.1, 0.1))
+        axs[0, 0].grid(color='gray', linestyle='-', linewidth=0.5)
+        axs[0, 0].plot([0, 0], [1, 1], 'g--')
+        axs[0, 0].plot(p_fpr, p_tpr)
 
-        axs[1].set(xlabel=pc_xlabel, ylabel=pc_ylabel, title=f"Precision Recall")
-        axs[1].set_xticks(np.arange(0, 1.1, 0.1))
-        axs[1].set_yticks(np.arange(0, 1.1, 0.1))
-        axs[1].grid(color='gray', linestyle='-', linewidth=0.5)
-        axs[1].plot([0, 1], [0, 0], 'g--')
-        axs[1].plot(p_rec, p_pr)
+        axs[0, 1].set(xlabel="Threshold", ylabel="False Positive Rate", title=f"ROC Threshold")
+        axs[0, 1].set_xticks(np.arange(0, 1.1, 0.1))
+        axs[0, 1].set_yticks(np.arange(0, 1.1, 0.1))
+        axs[0, 1].grid(color='gray', linestyle='-', linewidth=0.5)
+        axs[0, 1].plot(p_roc_thresh[1:], p_fpr[1:])
+
+        axs[1, 0].set(xlabel=pc_xlabel, ylabel=pc_ylabel, title=f"Precision Recall")
+        axs[1, 0].set_xticks(np.arange(0, 1.1, 0.1))
+        axs[1, 0].set_yticks(np.arange(0, 1.1, 0.1))
+        axs[1, 0].grid(color='gray', linestyle='-', linewidth=0.5)
+        axs[1, 0].plot([0, 1], [0, 0], 'g--')
+        axs[1, 0].plot(p_rec, p_pr)
+
+        axs[1, 1].set(xlabel="Threshold", ylabel=pc_ylabel, title=f"Precision Threshold")
+        axs[1, 1].set_xticks(np.arange(0, 1.1, 0.1))
+        axs[1, 1].set_yticks(np.arange(0, 1.1, 0.1))
+        axs[1, 1].grid(color='gray', linestyle='-', linewidth=0.5)
+        axs[1, 1].plot([0, 1], [0, 0], 'g--')
+        axs[1, 1].plot(p_prec_thresh, p_pr[1:])
+
+
 
         importlib.reload(np.core.numeric)  # Pandas causes numpy to break which is dumb....
         plt.show()
 
-        p_index = int(np.searchsorted(p_pr, 0.9, side="right") - 1)
-        thresh = p_thresh[p_index]
+        p_index_r = int(np.searchsorted(p_rec[1:], 0.8, side="right") - 1)
+        p_index_p = int(np.searchsorted(p_pr[1:], 0.95, side="right") - 1)
+        thresh = p_prec_thresh[p_index_r]
         print(thresh)
 
         s = pickle.dumps(svm)
