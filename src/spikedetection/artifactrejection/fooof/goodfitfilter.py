@@ -18,7 +18,7 @@ from typing import Any
 
 # Third-Party Packages #
 from baseobjects import BaseObject
-from baseobjects.types_ import AnyCallable
+from baseobjects.typing import AnyCallable
 
 # Local Packages #
 
